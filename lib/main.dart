@@ -211,7 +211,7 @@ class _ServerScreenState extends State<ServerScreen> {
       final forward = await _sshClient!.forwardRemote(port: 80);
       forward!.connections.listen((incoming) async {
         try {
-          final local = await Socket.connect(localIp, port);
+          final local = await Socket.connect('127.0.0.1', port);
           incoming.stream.cast<List<int>>().listen(
             (data) { try { local.add(data); } catch(e){} },
             onDone: () => local.close(),
