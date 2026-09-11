@@ -106,7 +106,7 @@ class _ServerScreenState extends State<ServerScreen> {
             if (ext == 'mp4' || ext == 'mkv') icon = "🎬";
             if (ext == 'apk') icon = "📱";
             if (ext == 'zip' || ext == 'rar') icon = "📦";
-            if (ext == 'jpg' || ext == 'png') icon = "🖼️";
+            if (ext == 'jpg' || ext == 'png' || ext == 'jpeg') icon = "🖼️";
 
             html += '<div class="file-card"><div class="file-header"><span class="file-name">$icon $fileName</span><a href="/download/$fileName" class="download-btn">⬇ Download</a></div>';
             
@@ -162,7 +162,6 @@ class _ServerScreenState extends State<ServerScreen> {
 
       final session = await _sshClient!.shell();
       
-      // Pinggy ki aati hui link ko automatically pakadna (Regex Magic)
       void extractUrl(String data) {
         final RegExp urlRegExp = RegExp(r'https:\/\/[a-zA-Z0-9-]+\.a\.free\.pinggy\.link');
         final match = urlRegExp.firstMatch(data);
@@ -174,12 +173,13 @@ class _ServerScreenState extends State<ServerScreen> {
         }
       }
 
-      session.stdout.transform(utf8.decoder).listen(extractUrl);
-      session.stderr.transform(utf8.decoder).listen(extractUrl);
+      // 🛠️ ERROR FIXED HERE: Added cast<List<int>>() 🛠️
+      session.stdout.cast<List<int>>().transform(utf8.decoder).listen((data) => extractUrl(data.toString()));
+      session.stderr.cast<List<int>>().transform(utf8.decoder).listen((data) => extractUrl(data.toString()));
 
-      // Traffic ko bypass karna local port 8080 par
+      // 🛠️ ERROR FIXED HERE: Changed forward.listen to forward.connections.listen 🛠️
       final forward = await _sshClient!.forwardRemote(port: 0);
-      forward.listen((SSHForwardChannel incoming) async {
+      forward.connections.listen((incoming) async {
         try {
           final local = await Socket.connect('127.0.0.1', port);
           incoming.stream.cast<List<int>>().listen(local.add, onDone: local.close);
