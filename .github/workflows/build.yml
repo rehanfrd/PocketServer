@@ -24,18 +24,9 @@ jobs:
         flutter create --platforms android .
         sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />' android/app/src/main/AndroidManifest.xml
         
-        # PYTHON HACK: 100% Guaranteed Version 36 Update
-        python -c "
-        import os
-        for f in ['android/app/build.gradle', 'android/app/build.gradle.kts']:
-            if os.path.exists(f):
-                with open(f, 'r') as file:
-                    data = file.read()
-                data = data.replace('flutter.compileSdkVersion', '36')
-                data = data.replace('flutter.targetSdkVersion', '36')
-                with open(f, 'w') as file:
-                    file.write(data)
-        "
+        # 🚀 THE ULTIMATE OVERRIDE TRICK 🚀
+        echo "android { compileSdk = 36 }" >> android/app/build.gradle || true
+        echo "android { compileSdk = 36 }" >> android/app/build.gradle.kts || true
 
     - run: flutter pub get
     - run: flutter build apk --release --no-tree-shake-icons
