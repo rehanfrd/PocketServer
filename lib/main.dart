@@ -38,7 +38,7 @@ class _ServerScreenState extends State<ServerScreen> {
   int port = 8080;
 
   File? singleSharedFile;
-  bool sharingEntireFolder = false;
+  bool sharingEntirePhone = false;
 
   SSHClient? _sshClient;
   String? publicUrl;
@@ -56,71 +56,31 @@ class _ServerScreenState extends State<ServerScreen> {
     localIp = '127.0.0.1';
   }
 
+  // 🚀 FEATURE 1: IN-BUILT CUSTOM FILE EXPLORER 🚀
   Future<void> startSingleFileServer() async {
     await Permission.storage.request();
     await Permission.manageExternalStorage.request();
     
-    Directory downloadDir = Directory('/storage/emulated/0/Download');
-    if (!downloadDir.existsSync()) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Download folder not found!')));
-      return;
-    }
-
-    List<File> files = downloadDir.listSync().whereType<File>().toList();
-    if (!mounted) return;
-    
-    File? pickedFile = await showModalBottomSheet<File>(
-      context: context,
-      backgroundColor: const Color(0xFF1E293B),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (context) {
-        return Column(
-          children: [
-            const Padding(
-              padding: EdgeInsets.all(20.0),
-              child: Text('Select a File to Share', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-            ),
-            Expanded(
-              child: files.isEmpty 
-              ? const Center(child: Text('No files in Download folder.', style: TextStyle(color: Colors.white54)))
-              : ListView.builder(
-                itemCount: files.length,
-                itemBuilder: (context, index) {
-                  File file = files[index];
-                  String fileName = file.path.split('/').last;
-                  return ListTile(
-                    leading: const Icon(Icons.insert_drive_file, color: Color(0xFF38BDF8)),
-                    title: Text(fileName, style: const TextStyle(color: Colors.white70), maxLines: 1, overflow: TextOverflow.ellipsis),
-                    onTap: () => Navigator.pop(context, file),
-                  );
-                },
-              ),
-            ),
-          ],
-        );
-      }
+    File? pickedFile = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const InAppFilePicker()),
     );
 
     if (pickedFile != null) {
       singleSharedFile = pickedFile;
-      sharingEntireFolder = false;
+      sharingEntirePhone = false;
       await _getIp();
       _startHttpServer();
     }
   }
 
-  Future<void> startFolderServer() async {
+  // 🚀 FEATURE 2: SHARE ENTIRE PHONE 🚀
+  Future<void> startPhoneServer() async {
     await Permission.storage.request();
     await Permission.manageExternalStorage.request();
     
-    Directory downloadDir = Directory('/storage/emulated/0/Download');
-    if (!downloadDir.existsSync()) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Download folder not found!')));
-      return;
-    }
-    
     singleSharedFile = null;
-    sharingEntireFolder = true;
+    sharingEntirePhone = true;
     await _getIp();
     _startHttpServer();
   }
@@ -130,95 +90,109 @@ class _ServerScreenState extends State<ServerScreen> {
     setState(() => isServerRunning = true);
 
     _server!.listen((HttpRequest request) async {
-      if (request.uri.path == '/') {
-        String html = '''
-          <!DOCTYPE html>
-          <html lang="en">
-          <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>ZingShare Files</title>
-            <style>
-              body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; background: #f8f9fa; color: #202124; }
-              .app-bar { background: #ffffff; padding: 18px 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); position: sticky; top: 0; z-index: 100; display: flex; align-items: center; }
-              .app-bar h2 { margin: 0; font-size: 20px; color: #1a73e8; font-weight: 600; letter-spacing: 0.5px; }
-              .list { list-style: none; padding: 0; margin: 0; }
-              .item { display: flex; align-items: center; padding: 16px 20px; border-bottom: 1px solid #e8eaed; background: #ffffff; text-decoration: none; color: inherit; transition: background 0.2s; }
-              .item:active { background: #f1f3f4; }
-              .icon { font-size: 26px; margin-right: 18px; }
-              .name { flex-grow: 1; font-size: 16px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-              .action { color: #1a73e8; font-size: 20px; font-weight: bold; }
-            </style>
-          </head>
-          <body>
-            <div class="app-bar"><h2>📁 Shared Files</h2></div>
-            <ul class="list">
-        ''';
+      String requestPath = Uri.decodeComponent(request.uri.path);
+      
+      // === WEB UI HTML TEMPLATE ===
+      String startHtml(String title) => '''
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>$title</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; background: #f8f9fa; color: #202124; }
+            .app-bar { background: #ffffff; padding: 18px 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); position: sticky; top: 0; z-index: 100; display: flex; align-items: center; }
+            .app-bar h2 { margin: 0; font-size: 20px; color: #1a73e8; font-weight: 600; }
+            .list { list-style: none; padding: 0; margin: 0; }
+            .item { display: flex; align-items: center; padding: 16px 20px; border-bottom: 1px solid #e8eaed; background: #ffffff; text-decoration: none; color: inherit; }
+            .item:hover { background: #f1f3f4; }
+            .icon { font-size: 26px; margin-right: 18px; }
+            .name { flex-grow: 1; font-size: 16px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .action { color: #1a73e8; font-size: 20px; font-weight: bold; }
+          </style>
+        </head>
+        <body>
+          <div class="app-bar"><h2>$title</h2></div>
+          <ul class="list">
+      ''';
+
+      if (sharingEntirePhone) {
+        String basePath = '/storage/emulated/0';
+        String fullPath = requestPath == '/' ? basePath : '$basePath$requestPath';
         
-        List<File> filesToShow = [];
-        if (sharingEntireFolder) {
-          Directory downloadDir = Directory('/storage/emulated/0/Download');
-          List<FileSystemEntity> entities = downloadDir.listSync();
-          for (var e in entities) { if (e is File) filesToShow.add(e); }
-        } else if (singleSharedFile != null) {
-          filesToShow.add(singleSharedFile!);
-        }
-
-        for (var file in filesToShow) {
-          String fileName = file.path.split('/').last;
-          String ext = fileName.split('.').last.toLowerCase();
+        if (FileSystemEntity.isDirectorySync(fullPath)) {
+          // 📁 DIRECTORY DIKHAO (Web Browser ke andar Folders khulenge)
+          Directory dir = Directory(fullPath);
+          String html = startHtml(requestPath == '/' ? '📱 My Phone Storage' : '📁 ${requestPath.split('/').last}');
           
-          String icon = "📄";
-          if (['mp3', 'wav', 'm4a'].contains(ext)) icon = "🎵";
-          if (['mp4', 'mkv', 'webm'].contains(ext)) icon = "🎬";
-          if (['jpg', 'jpeg', 'png'].contains(ext)) icon = "🖼️";
-          if (['apk'].contains(ext)) icon = "📱";
-          if (['zip', 'rar'].contains(ext)) icon = "📦";
-
-          html += '''
-            <a href="/file/${Uri.encodeComponent(fileName)}" class="item">
-              <div class="icon">$icon</div>
-              <div class="name">$fileName</div>
-              <div class="action">↓</div>
-            </a>
-          ''';
-        }
-        
-        html += '</ul></body></html>';
-        request.response..headers.contentType = ContentType.html..write(html)..close();
-          
-      } else if (request.uri.path.startsWith('/file/')) {
-        String fileName = Uri.decodeComponent(request.uri.pathSegments.last);
-        File? fileToServe;
-
-        if (sharingEntireFolder) {
-          fileToServe = File('/storage/emulated/0/Download/$fileName');
-        } else if (singleSharedFile != null && singleSharedFile!.path.endsWith(fileName)) {
-          fileToServe = singleSharedFile;
-        }
-
-        if (fileToServe != null && fileToServe.existsSync()) {
-          String ext = fileName.split('.').last.toLowerCase();
-          
-          if (['mp4', 'mkv', 'webm'].contains(ext)) {
-            request.response.headers.contentType = ContentType.parse('video/mp4');
-          } else if (['mp3', 'wav', 'm4a'].contains(ext)) {
-            request.response.headers.contentType = ContentType.parse('audio/mpeg');
-          } else if (['jpg', 'jpeg', 'png'].contains(ext)) {
-            request.response.headers.contentType = ContentType.parse('image/jpeg');
-          } else {
-            request.response.headers.add('Content-Disposition', 'attachment; filename="$fileName"');
+          if (requestPath != '/') {
+            String parentPath = requestPath.substring(0, requestPath.lastIndexOf('/'));
+            if (parentPath.isEmpty) parentPath = '/';
+            html += '<a href="$parentPath" class="item"><div class="icon">🔙</div><div class="name">... Go Back</div></a>';
           }
           
-          await fileToServe.openRead().pipe(request.response).catchError((e) => request.response.close());
+          List<FileSystemEntity> entities = dir.listSync()..sort((a, b) {
+            bool aIsDir = a is Directory;
+            bool bIsDir = b is Directory;
+            if (aIsDir && !bIsDir) return -1;
+            if (!aIsDir && bIsDir) return 1;
+            return a.path.toLowerCase().compareTo(b.path.toLowerCase());
+          });
+
+          for (var e in entities) {
+            String name = e.path.split('/').last;
+            if (name.startsWith('.')) continue; // Hidden files hide karo
+            
+            String linkPath = requestPath == '/' ? '/$name' : '$requestPath/$name';
+            
+            if (e is Directory) {
+              html += '<a href="${Uri.encodeComponent(linkPath).replaceAll('%2F', '/')}" class="item"><div class="icon">📁</div><div class="name">$name</div><div class="action">></div></a>';
+            } else {
+              String ext = name.split('.').last.toLowerCase();
+              String icon = "📄";
+              if (['mp3', 'wav', 'm4a'].contains(ext)) icon = "🎵";
+              if (['mp4', 'mkv', 'webm'].contains(ext)) icon = "🎬";
+              if (['jpg', 'jpeg', 'png'].contains(ext)) icon = "🖼️";
+              if (['apk'].contains(ext)) icon = "📱";
+              html += '<a href="${Uri.encodeComponent(linkPath).replaceAll('%2F', '/')}" class="item"><div class="icon">$icon</div><div class="name">$name</div><div class="action">↓</div></a>';
+            }
+          }
+          html += '</ul></body></html>';
+          request.response..headers.contentType = ContentType.html..write(html)..close();
+          
+        } else if (FileSystemEntity.isFileSync(fullPath)) {
+          // 📄 FILE STREAM KARO (Play/Download)
+          File file = File(fullPath);
+          String ext = fullPath.split('.').last.toLowerCase();
+          if (['mp4', 'mkv'].contains(ext)) request.response.headers.contentType = ContentType.parse('video/mp4');
+          else if (['mp3', 'wav'].contains(ext)) request.response.headers.contentType = ContentType.parse('audio/mpeg');
+          else if (['jpg', 'png'].contains(ext)) request.response.headers.contentType = ContentType.parse('image/jpeg');
+          else request.response.headers.add('Content-Disposition', 'attachment; filename="${fullPath.split('/').last}"');
+          
+          await file.openRead().pipe(request.response).catchError((e) => request.response.close());
         } else {
-          request.response..statusCode = HttpStatus.notFound..write('File Not Found')..close();
+          request.response..statusCode = HttpStatus.notFound..write('Not Found')..close();
+        }
+        
+      } else {
+        // === SINGLE FILE SHARE LOGIC ===
+        if (requestPath == '/') {
+          String html = startHtml('📄 Shared File');
+          String fileName = singleSharedFile!.path.split('/').last;
+          html += '<a href="/download" class="item"><div class="icon">📄</div><div class="name">$fileName</div><div class="action">↓</div></a>';
+          html += '</ul></body></html>';
+          request.response..headers.contentType = ContentType.html..write(html)..close();
+        } else if (requestPath == '/download') {
+          String fileName = singleSharedFile!.path.split('/').last;
+          request.response.headers.add('Content-Disposition', 'attachment; filename="$fileName"');
+          await singleSharedFile!.openRead().pipe(request.response).catchError((e) => request.response.close());
         }
       }
     });
   }
 
-  // === NEW TUNNEL ENGINE (LOCALHOST.RUN) - 100% RELIABLE ===
+  // === TUNNEL ENGINE (BACK TO PINGGY - NO AUTH REQUIRED) ===
   Future<void> startPublicTunnel() async {
     setState(() {
       isTunnelStarting = true;
@@ -226,28 +200,22 @@ class _ServerScreenState extends State<ServerScreen> {
     });
 
     try {
-      // 1. Localhost.run par connect karna (Port 22)
-      final socket = await SSHSocket.connect('localhost.run', 22);
+      final socket = await SSHSocket.connect('a.pinggy.io', 443);
       _sshClient = SSHClient(
         socket,
-        username: 'localhost', // Localhost.run ko yehi username chahiye
+        username: 'pinggy',
         onPasswordRequest: () => '',
       );
 
-      // 2. HTTP Tunnel request (Port 80)
-      final forward = await _sshClient!.forwardRemote(port: 80);
-      
+      final forward = await _sshClient!.forwardRemote(port: 0);
       forward!.connections.listen((incoming) async {
         try {
-          // Localhost IP se jodo taaki router block na kare
-          final local = await Socket.connect('127.0.0.1', port);
-          
+          final local = await Socket.connect(localIp, port);
           incoming.stream.cast<List<int>>().listen(
             (data) { try { local.add(data); } catch(e){} },
             onDone: () => local.close(),
             onError: (e) => local.close(),
           );
-          
           local.listen(
             (data) { try { incoming.sink.add(data); } catch(e){} },
             onDone: () => incoming.close(),
@@ -258,14 +226,12 @@ class _ServerScreenState extends State<ServerScreen> {
         }
       });
 
-      // 3. Output padhna taaki link mil sake
-      final session = await _sshClient!.shell();
+      final session = await _sshClient!.shell(pty: const SSHPtyConfig(width: 100, height: 50));
       
       String buffer = '';
       void extractUrl(String data) {
         buffer += data;
-        // Localhost.run ki link aisi dikhti hai: https://xxxx.lhr.life ya .pro
-        final RegExp urlRegExp = RegExp(r'https:\/\/[a-zA-Z0-9.-]+\.(?:lhr\.life|localhost\.run|lhr\.pro)');
+        final RegExp urlRegExp = RegExp(r'https:\/\/[a-zA-Z0-9.-]+\.pinggy\.[a-z]+');
         final match = urlRegExp.firstMatch(buffer);
         
         if (match != null && publicUrl == null) {
@@ -328,7 +294,7 @@ class _ServerScreenState extends State<ServerScreen> {
                   decoration: BoxDecoration(color: const Color(0xFF1E293B), borderRadius: BorderRadius.circular(20), border: Border.all(color: const Color(0xFF38BDF8), width: 2)),
                   child: Column(
                     children: [
-                      Text(sharingEntireFolder ? 'Sharing Entire Folder 📁' : 'Sharing Single File 📄', style: const TextStyle(color: Color(0xFF4ADE80), fontSize: 16, fontWeight: FontWeight.bold)),
+                      Text(sharingEntirePhone ? 'Sharing Entire Phone 📱' : 'Sharing Single File 📄', style: const TextStyle(color: Color(0xFF4ADE80), fontSize: 16, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 10),
                       SelectableText('http://$localIp:$port', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 25),
@@ -374,7 +340,7 @@ class _ServerScreenState extends State<ServerScreen> {
                 const SizedBox(height: 30),
                 
                 ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF38BDF8), padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15)),
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF38BDF8), padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15)),
                   onPressed: startSingleFileServer,
                   icon: const Icon(Icons.insert_drive_file, color: Colors.white),
                   label: const Text('Select a Single File', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
@@ -383,15 +349,95 @@ class _ServerScreenState extends State<ServerScreen> {
                 const Text('--- OR ---', style: TextStyle(color: Colors.white54)),
                 const SizedBox(height: 15),
                 ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1E293B), padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15), side: const BorderSide(color: Color(0xFF38BDF8))),
-                  onPressed: startFolderServer,
-                  icon: const Icon(Icons.folder, color: Color(0xFF38BDF8)),
-                  label: const Text('Share "Download" Folder', style: TextStyle(color: Color(0xFF38BDF8), fontSize: 16, fontWeight: FontWeight.bold)),
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1E293B), padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15), side: const BorderSide(color: Color(0xFF38BDF8))),
+                  onPressed: startPhoneServer,
+                  icon: const Icon(Icons.phone_android, color: Color(0xFF38BDF8)),
+                  label: const Text('Share Entire Phone Storage', style: TextStyle(color: Color(0xFF38BDF8), fontSize: 16, fontWeight: FontWeight.bold)),
                 ),
               ]
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// 🚀 CUSTOM IN-APP FILE EXPLORER WIDGET 🚀
+class InAppFilePicker extends StatefulWidget {
+  const InAppFilePicker({super.key});
+  @override
+  State<InAppFilePicker> createState() => _InAppFilePickerState();
+}
+
+class _InAppFilePickerState extends State<InAppFilePicker> {
+  String currentPath = '/storage/emulated/0';
+  List<FileSystemEntity> items = [];
+
+  @override
+  void initState() {
+    super.initState();
+    loadFiles();
+  }
+
+  void loadFiles() {
+    try {
+      Directory dir = Directory(currentPath);
+      setState(() {
+        items = dir.listSync()..sort((a, b) {
+          if (a is Directory && b is File) return -1;
+          if (a is File && b is Directory) return 1;
+          return a.path.toLowerCase().compareTo(b.path.toLowerCase());
+        });
+      });
+    } catch (e) {
+      items = [];
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Select File', style: TextStyle(fontSize: 18)),
+        backgroundColor: const Color(0xFF1E293B),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            if (currentPath == '/storage/emulated/0') {
+              Navigator.pop(context);
+            } else {
+              setState(() {
+                currentPath = Directory(currentPath).parent.path;
+                loadFiles();
+              });
+            }
+          },
+        ),
+      ),
+      body: ListView.builder(
+        itemCount: items.length,
+        itemBuilder: (context, index) {
+          FileSystemEntity item = items[index];
+          String name = item.path.split('/').last;
+          if (name.startsWith('.')) return const SizedBox(); // Hide hidden files
+
+          bool isDir = item is Directory;
+          return ListTile(
+            leading: Icon(isDir ? Icons.folder : Icons.insert_drive_file, color: isDir ? const Color(0xFF38BDF8) : Colors.white70),
+            title: Text(name, style: const TextStyle(color: Colors.white)),
+            onTap: () {
+              if (isDir) {
+                setState(() {
+                  currentPath = item.path;
+                  loadFiles();
+                });
+              } else {
+                Navigator.pop(context, File(item.path));
+              }
+            },
+          );
+        },
       ),
     );
   }
