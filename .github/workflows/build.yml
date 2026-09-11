@@ -1,4 +1,4 @@
-name: Build Pocket Server APK
+name: Build ZingShare APK
 
 on:
   push:
@@ -18,16 +18,24 @@ jobs:
       with:
         channel: 'stable'
     
-    - name: Setup Android
+    - name: Setup Android & API 36 Fix
       run: |
         rm -rf android
         flutter create --platforms android .
+        
+        # Permissions add karna
         sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />' android/app/src/main/AndroidManifest.xml
+        
+        # 🚀 FILE PICKER API 36 FIX 🚀
+        sed -i 's/flutter\.compileSdkVersion/36/g' android/app/build.gradle || true
+        sed -i 's/flutter\.compileSdkVersion/36/g' android/app/build.gradle.kts || true
+        sed -i 's/flutter\.targetSdkVersion/36/g' android/app/build.gradle || true
+        sed -i 's/flutter\.targetSdkVersion/36/g' android/app/build.gradle.kts || true
 
     - run: flutter pub get
     - run: flutter build apk --release --no-tree-shake-icons
     
     - uses: actions/upload-artifact@v4
       with:
-        name: Pocket-Server-App
+        name: ZingShare-Premium
         path: build/app/outputs/flutter-apk/app-release.apk
