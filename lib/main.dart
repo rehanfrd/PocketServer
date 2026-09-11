@@ -56,7 +56,6 @@ class _ServerScreenState extends State<ServerScreen> {
     localIp = '127.0.0.1';
   }
 
-  // 🚀 HAMARA KHUD KA CUSTOM FILE PICKER 🚀
   Future<void> startSingleFileServer() async {
     await Permission.storage.request();
     await Permission.manageExternalStorage.request();
@@ -68,10 +67,8 @@ class _ServerScreenState extends State<ServerScreen> {
     }
 
     List<File> files = downloadDir.listSync().whereType<File>().toList();
-    
     if (!mounted) return;
     
-    // Bottom Sheet me files dikhana
     File? pickedFile = await showModalBottomSheet<File>(
       context: context,
       backgroundColor: const Color(0xFF1E293B),
@@ -221,6 +218,7 @@ class _ServerScreenState extends State<ServerScreen> {
     });
   }
 
+  // === NEW TUNNEL ENGINE (LOCALHOST.RUN) - 100% RELIABLE ===
   Future<void> startPublicTunnel() async {
     setState(() {
       isTunnelStarting = true;
@@ -228,22 +226,28 @@ class _ServerScreenState extends State<ServerScreen> {
     });
 
     try {
-      final socket = await SSHSocket.connect('a.pinggy.io', 443);
+      // 1. Localhost.run par connect karna (Port 22)
+      final socket = await SSHSocket.connect('localhost.run', 22);
       _sshClient = SSHClient(
         socket,
-        username: 'pinggy',
+        username: 'localhost', // Localhost.run ko yehi username chahiye
         onPasswordRequest: () => '',
       );
 
-      final forward = await _sshClient!.forwardRemote(port: 0);
+      // 2. HTTP Tunnel request (Port 80)
+      final forward = await _sshClient!.forwardRemote(port: 80);
+      
       forward!.connections.listen((incoming) async {
         try {
-          final local = await Socket.connect(localIp, port);
+          // Localhost IP se jodo taaki router block na kare
+          final local = await Socket.connect('127.0.0.1', port);
+          
           incoming.stream.cast<List<int>>().listen(
             (data) { try { local.add(data); } catch(e){} },
             onDone: () => local.close(),
             onError: (e) => local.close(),
           );
+          
           local.listen(
             (data) { try { incoming.sink.add(data); } catch(e){} },
             onDone: () => incoming.close(),
@@ -254,12 +258,14 @@ class _ServerScreenState extends State<ServerScreen> {
         }
       });
 
-      final session = await _sshClient!.shell(pty: const SSHPtyConfig(width: 100, height: 50));
+      // 3. Output padhna taaki link mil sake
+      final session = await _sshClient!.shell();
       
       String buffer = '';
       void extractUrl(String data) {
         buffer += data;
-        final RegExp urlRegExp = RegExp(r'https:\/\/[a-zA-Z0-9.-]+\.pinggy\.[a-z]+');
+        // Localhost.run ki link aisi dikhti hai: https://xxxx.lhr.life ya .pro
+        final RegExp urlRegExp = RegExp(r'https:\/\/[a-zA-Z0-9.-]+\.(?:lhr\.life|localhost\.run|lhr\.pro)');
         final match = urlRegExp.firstMatch(buffer);
         
         if (match != null && publicUrl == null) {
