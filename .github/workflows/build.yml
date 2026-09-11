@@ -1,0 +1,33 @@
+name: Build Pocket Server APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-java@v5
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+    - uses: subosito/flutter-action@v2
+      with:
+        channel: 'stable'
+    
+    - name: Setup Android & Permissions
+      run: |
+        rm -rf android
+        flutter create --platforms android .
+        sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />' android/app/src/main/AndroidManifest.xml
+
+    - run: flutter pub get
+    - run: flutter build apk --release --no-tree-shake-icons
+    
+    - uses: actions/upload-artifact@v4
+      with:
+        name: Pocket-Server-App
+        path: build/app/outputs/flutter-apk/app-release.apk
