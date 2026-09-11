@@ -52,6 +52,7 @@ class _ServerScreenState extends State<ServerScreen> {
       return;
     }
 
+    // 🚀 IP FETCH SAFETY 🚀
     for (var interface in await NetworkInterface.list()) {
       for (var addr in interface.addresses) {
         if (addr.type == InternetAddressType.IPv4) {
@@ -60,6 +61,7 @@ class _ServerScreenState extends State<ServerScreen> {
         }
       }
     }
+    if (localIp.isEmpty) localIp = '127.0.0.1'; // Failsafe
 
     _server = await HttpServer.bind(InternetAddress.anyIPv4, port);
     setState(() => isServerRunning = true);
@@ -145,7 +147,7 @@ class _ServerScreenState extends State<ServerScreen> {
     });
   }
 
-  // === THE MAGIC TUNNEL ENGINE (ULTIMATE FIX) ===
+  // === THE MAGIC TUNNEL ENGINE (CONNECTION RESET FIX) ===
   Future<void> startPublicTunnel() async {
     setState(() {
       isTunnelStarting = true;
@@ -163,25 +165,33 @@ class _ServerScreenState extends State<ServerScreen> {
       final forward = await _sshClient!.forwardRemote(port: 0);
       forward!.connections.listen((incoming) async {
         try {
-          final local = await Socket.connect('127.0.0.1', port);
-          incoming.stream.cast<List<int>>().listen(local.add, onDone: local.close);
-          local.listen(incoming.sink.add, onDone: incoming.close);
+          // 🚀 FIX: Localhost ki jagah Asli IP use kiya, jisse security block na kare
+          final local = await Socket.connect(localIp, port);
+          
+          // 🚀 FIX: Data stream ko fail-safe banaya (Error aane par destroy)
+          incoming.stream.cast<List<int>>().listen(
+            (data) => local.add(data),
+            onDone: () => local.destroy(),
+            onError: (_) => local.destroy(),
+          );
+          
+          local.listen(
+            (data) => incoming.sink.add(data),
+            onDone: () => incoming.close(),
+            onError: (_) => incoming.close(),
+          );
         } catch (e) {
           incoming.close();
         }
       });
 
-      // 🚀 NEW: PTY config taaki server link jaldi bhej de
       final session = await _sshClient!.shell(
         pty: const SSHPtyConfig(width: 100, height: 50)
       );
       
-      // 🚀 NEW: Data Buffer jo tukdo ko jodeyga
       String buffer = '';
       void extractUrl(String data) {
         buffer += data;
-        
-        // Pinggy regex update kiya hai
         final RegExp urlRegExp = RegExp(r'https:\/\/[a-zA-Z0-9.-]+\.pinggy\.[a-z]+');
         final match = urlRegExp.firstMatch(buffer);
         
@@ -196,7 +206,6 @@ class _ServerScreenState extends State<ServerScreen> {
       session.stdout.cast<List<int>>().transform(utf8.decoder).listen((data) => extractUrl(data.toString()));
       session.stderr.cast<List<int>>().transform(utf8.decoder).listen((data) => extractUrl(data.toString()));
 
-      // 🚀 Timeout ko 25 second kar diya hai (Slow network support)
       Future.delayed(const Duration(seconds: 25), () {
         if (mounted && isTunnelStarting) {
           setState(() {
@@ -269,7 +278,7 @@ class _ServerScreenState extends State<ServerScreen> {
                       ] else if (isTunnelStarting) ...[
                         const CircularProgressIndicator(color: Color(0xFF38BDF8)),
                         const SizedBox(height: 10),
-                        const Text('Extracting Public Link...', style: TextStyle(color: Colors.white70)),
+                        const Text('Generating Public Link...', style: TextStyle(color: Colors.white70)),
                       ] else ...[
                         ElevatedButton.icon(
                           onPressed: startPublicTunnel,
