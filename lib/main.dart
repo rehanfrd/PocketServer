@@ -192,7 +192,7 @@ class _ServerScreenState extends State<ServerScreen> {
     });
   }
 
-  // === TUNNEL ENGINE (SERVEO.NET WITH ROBUST PIPING) ===
+  // === TUNNEL ENGINE (SERVEO.NET WITH COMPILE-SAFE LISTENER) ===
   Future<void> startPublicTunnel() async {
     setState(() {
       isTunnelStarting = true;
@@ -200,7 +200,6 @@ class _ServerScreenState extends State<ServerScreen> {
     });
 
     try {
-      // 🌐 Changed to Serveo
       final socket = await SSHSocket.connect('serveo.net', 22);
       _sshClient = SSHClient(
         socket,
@@ -213,13 +212,17 @@ class _ServerScreenState extends State<ServerScreen> {
         try {
           final local = await Socket.connect('127.0.0.1', port);
           
-          // 🚀 ROBUST DATA PIPING to prevent connection reset
-          Future.wait([
-            incoming.stream.cast<List<int>>().pipe(local),
-            local.pipe(incoming.sink),
-          ]).catchError((e) {
-            // Ignore pipeline close events
-          });
+          // 🚀 FIX: Reverted to type-safe .listen() to fix the Build Error!
+          incoming.stream.cast<List<int>>().listen(
+            (data) { try { local.add(data); } catch(e){} },
+            onDone: () => local.close(),
+            onError: (e) => local.close(),
+          );
+          local.listen(
+            (data) { try { incoming.sink.add(data); } catch(e){} },
+            onDone: () => incoming.close(),
+            onError: (e) => incoming.close(),
+          );
         } catch (e) {
           incoming.close();
         }
@@ -230,7 +233,6 @@ class _ServerScreenState extends State<ServerScreen> {
       String buffer = '';
       void extractUrl(String data) {
         buffer += data;
-        // 🌐 URL Regex updated for Serveo (.serveo.net)
         final RegExp urlRegExp = RegExp(r'https:\/\/[a-zA-Z0-9.-]+\.serveo\.net');
         final match = urlRegExp.firstMatch(buffer);
         
