@@ -207,7 +207,8 @@ class _ServerScreenState extends State<ServerScreen> {
         onPasswordRequest: () => '',
       );
 
-      final forward = await _sshClient!.forwardRemote(port: 0);
+      // Maine yahan port: 0 ko port: 80 se change kar diya hai taaki public web tunnel bane
+      final forward = await _sshClient!.forwardRemote(port: 80);
       forward!.connections.listen((incoming) async {
         try {
           final local = await Socket.connect(localIp, port);
