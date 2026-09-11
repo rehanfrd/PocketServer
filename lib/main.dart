@@ -192,7 +192,7 @@ class _ServerScreenState extends State<ServerScreen> {
     });
   }
 
-  // === TUNNEL ENGINE (BACK TO PINGGY - NO AUTH REQUIRED) ===
+  // === TUNNEL ENGINE (ALTERNATIVE: LOCALHOST.RUN) ===
   Future<void> startPublicTunnel() async {
     setState(() {
       isTunnelStarting = true;
@@ -200,17 +200,18 @@ class _ServerScreenState extends State<ServerScreen> {
     });
 
     try {
-      final socket = await SSHSocket.connect('a.pinggy.io', 443);
+      // Pinggy ki jagah hum 'localhost.run' server (port 22) use kar rahe hain
+      final socket = await SSHSocket.connect('localhost.run', 22);
       _sshClient = SSHClient(
         socket,
-        username: 'pinggy',
+        username: 'client',
         onPasswordRequest: () => '',
       );
 
-      // Maine yahan port: 0 ko port: 80 se change kar diya hai taaki public web tunnel bane
       final forward = await _sshClient!.forwardRemote(port: 80);
       forward!.connections.listen((incoming) async {
         try {
+          // Local IP ki jagah direct 127.0.0.1 (localhost) use kar rahe hain taaki Android block na kare
           final local = await Socket.connect('127.0.0.1', port);
           incoming.stream.cast<List<int>>().listen(
             (data) { try { local.add(data); } catch(e){} },
@@ -232,7 +233,8 @@ class _ServerScreenState extends State<ServerScreen> {
       String buffer = '';
       void extractUrl(String data) {
         buffer += data;
-        final RegExp urlRegExp = RegExp(r'https:\/\/[a-zA-Z0-9.-]+\.pinggy\.[a-z]+');
+        // Localhost.run ka URL format (subdomain.lhr.life) catch karne ke liye naya RegExp
+        final RegExp urlRegExp = RegExp(r'https:\/\/[a-zA-Z0-9.-]+\.lhr\.life');
         final match = urlRegExp.firstMatch(buffer);
         
         if (match != null && publicUrl == null) {
