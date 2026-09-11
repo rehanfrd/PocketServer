@@ -142,7 +142,7 @@ class _ServerScreenState extends State<ServerScreen> {
 
           for (var e in entities) {
             String name = e.path.split('/').last;
-            if (name.startsWith('.')) continue;
+            if (name.startsWith('.')) continue; // Hidden files hide
             
             String linkPath = requestPath == '/' ? '/$name' : '$requestPath/$name';
             
@@ -192,7 +192,7 @@ class _ServerScreenState extends State<ServerScreen> {
     });
   }
 
-  // === TUNNEL ENGINE (BACK TO PINGGY + CONNECTION RESET FIX) ===
+  // === TUNNEL ENGINE (PINGGY + ROBUST PIPING FIX) ===
   Future<void> startPublicTunnel() async {
     setState(() {
       isTunnelStarting = true;
@@ -210,19 +210,16 @@ class _ServerScreenState extends State<ServerScreen> {
       final forward = await _sshClient!.forwardRemote(port: 80);
       forward!.connections.listen((incoming) async {
         try {
-          // 🚀 MAIN FIX: 'localIp' ki jagah direct '127.0.0.1' use kar rahe hain taaki connection reset na ho!
+          // IP 127.0.0.1 (Localhost) use kar rahe hain connection allow karne ke liye
           final local = await Socket.connect('127.0.0.1', port);
           
-          incoming.stream.cast<List<int>>().listen(
-            (data) { try { local.add(data); } catch(e){} },
-            onDone: () => local.close(),
-            onError: (e) => local.close(),
-          );
-          local.listen(
-            (data) { try { incoming.sink.add(data); } catch(e){} },
-            onDone: () => incoming.close(),
-            onError: (e) => incoming.close(),
-          );
+          // 🚀 ROBUST DATA PIPING: Ye block data flow ko smooth banayega aur "Connection Reset" ko rokega
+          Future.wait([
+            incoming.stream.cast<List<int>>().pipe(local),
+            local.pipe(incoming.sink),
+          ]).catchError((e) {
+            // Ignore pipeline close events
+          });
         } catch (e) {
           incoming.close();
         }
