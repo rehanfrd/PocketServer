@@ -145,6 +145,7 @@ class _ServerScreenState extends State<ServerScreen> {
     });
   }
 
+  // === THE MAGIC TUNNEL ENGINE (FIXED FAST LOADING) ===
   Future<void> startPublicTunnel() async {
     setState(() {
       isTunnelStarting = true;
@@ -152,6 +153,7 @@ class _ServerScreenState extends State<ServerScreen> {
     });
 
     try {
+      // 1. Pinggy Server se connect karo
       final socket = await SSHSocket.connect('a.pinggy.io', 443);
       _sshClient = SSHClient(
         socket,
@@ -159,10 +161,23 @@ class _ServerScreenState extends State<ServerScreen> {
         onPasswordRequest: () => '',
       );
 
+      // 2. Shell kholne se PEHLE Tunnel (port 0) maango
+      final forward = await _sshClient!.forwardRemote(port: 0);
+      forward!.connections.listen((incoming) async {
+        try {
+          final local = await Socket.connect('127.0.0.1', port);
+          incoming.stream.cast<List<int>>().listen(local.add, onDone: local.close);
+          local.listen(incoming.sink.add, onDone: incoming.close);
+        } catch (e) {
+          incoming.close();
+        }
+      });
+
+      // 3. Ab shell kholo taaki Pinggy hume URL de sake
       final session = await _sshClient!.shell();
       
       void extractUrl(String data) {
-        final RegExp urlRegExp = RegExp(r'https:\/\/[a-zA-Z0-9-]+\.a\.free\.pinggy\.link');
+        final RegExp urlRegExp = RegExp(r'https?:\/\/[a-zA-Z0-9.-]+\.pinggy\.link');
         final match = urlRegExp.firstMatch(data);
         if (match != null && publicUrl == null) {
           setState(() {
@@ -175,21 +190,22 @@ class _ServerScreenState extends State<ServerScreen> {
       session.stdout.cast<List<int>>().transform(utf8.decoder).listen((data) => extractUrl(data.toString()));
       session.stderr.cast<List<int>>().transform(utf8.decoder).listen((data) => extractUrl(data.toString()));
 
-      // 🛠️ NULL SAFETY FIX HERE: forward!.connections 🛠️
-      final forward = await _sshClient!.forwardRemote(port: 0);
-      forward!.connections.listen((incoming) async {
-        try {
-          final local = await Socket.connect('127.0.0.1', port);
-          incoming.stream.cast<List<int>>().listen(local.add, onDone: local.close);
-          local.listen(incoming.sink.add, onDone: incoming.close);
-        } catch (e) {
-          incoming.close();
+      // 4. Timeout safety (agar 15 sec me link na aaye)
+      Future.delayed(const Duration(seconds: 15), () {
+        if (mounted && isTunnelStarting) {
+          setState(() {
+            isTunnelStarting = false;
+            _sshClient?.close();
+          });
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Server is busy. Please try again!')));
         }
       });
 
     } catch (e) {
-      setState(() => isTunnelStarting = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Tunnel Error: $e')));
+      if (mounted) {
+        setState(() => isTunnelStarting = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Tunnel Error: $e')));
+      }
     }
   }
 
