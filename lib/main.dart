@@ -145,7 +145,7 @@ class _ServerScreenState extends State<ServerScreen> {
     });
   }
 
-  // === THE MAGIC TUNNEL ENGINE (FIXED FAST LOADING) ===
+  // === THE MAGIC TUNNEL ENGINE (ULTIMATE FIX) ===
   Future<void> startPublicTunnel() async {
     setState(() {
       isTunnelStarting = true;
@@ -153,7 +153,6 @@ class _ServerScreenState extends State<ServerScreen> {
     });
 
     try {
-      // 1. Pinggy Server se connect karo
       final socket = await SSHSocket.connect('a.pinggy.io', 443);
       _sshClient = SSHClient(
         socket,
@@ -161,7 +160,6 @@ class _ServerScreenState extends State<ServerScreen> {
         onPasswordRequest: () => '',
       );
 
-      // 2. Shell kholne se PEHLE Tunnel (port 0) maango
       final forward = await _sshClient!.forwardRemote(port: 0);
       forward!.connections.listen((incoming) async {
         try {
@@ -173,12 +171,20 @@ class _ServerScreenState extends State<ServerScreen> {
         }
       });
 
-      // 3. Ab shell kholo taaki Pinggy hume URL de sake
-      final session = await _sshClient!.shell();
+      // 🚀 NEW: PTY config taaki server link jaldi bhej de
+      final session = await _sshClient!.shell(
+        pty: const SSHPtyConfig(width: 100, height: 50)
+      );
       
+      // 🚀 NEW: Data Buffer jo tukdo ko jodeyga
+      String buffer = '';
       void extractUrl(String data) {
-        final RegExp urlRegExp = RegExp(r'https?:\/\/[a-zA-Z0-9.-]+\.pinggy\.link');
-        final match = urlRegExp.firstMatch(data);
+        buffer += data;
+        
+        // Pinggy regex update kiya hai
+        final RegExp urlRegExp = RegExp(r'https:\/\/[a-zA-Z0-9.-]+\.pinggy\.[a-z]+');
+        final match = urlRegExp.firstMatch(buffer);
+        
         if (match != null && publicUrl == null) {
           setState(() {
             publicUrl = match.group(0);
@@ -190,14 +196,14 @@ class _ServerScreenState extends State<ServerScreen> {
       session.stdout.cast<List<int>>().transform(utf8.decoder).listen((data) => extractUrl(data.toString()));
       session.stderr.cast<List<int>>().transform(utf8.decoder).listen((data) => extractUrl(data.toString()));
 
-      // 4. Timeout safety (agar 15 sec me link na aaye)
-      Future.delayed(const Duration(seconds: 15), () {
+      // 🚀 Timeout ko 25 second kar diya hai (Slow network support)
+      Future.delayed(const Duration(seconds: 25), () {
         if (mounted && isTunnelStarting) {
           setState(() {
             isTunnelStarting = false;
             _sshClient?.close();
           });
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Server is busy. Please try again!')));
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Network is slow. Please try again!')));
         }
       });
 
@@ -263,7 +269,7 @@ class _ServerScreenState extends State<ServerScreen> {
                       ] else if (isTunnelStarting) ...[
                         const CircularProgressIndicator(color: Color(0xFF38BDF8)),
                         const SizedBox(height: 10),
-                        const Text('Generating Public Link...', style: TextStyle(color: Colors.white70)),
+                        const Text('Extracting Public Link...', style: TextStyle(color: Colors.white70)),
                       ] else ...[
                         ElevatedButton.icon(
                           onPressed: startPublicTunnel,
