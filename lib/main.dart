@@ -122,7 +122,7 @@ class _ServerScreenState extends State<ServerScreen> {
         String fullPath = requestPath == '/' ? basePath : '$basePath$requestPath';
         
         if (FileSystemEntity.isDirectorySync(fullPath)) {
-          // 📁 DIRECTORY DIKHAO (Web Browser ke andar Folders khulenge)
+          // 📁 DIRECTORY DIKHAO
           Directory dir = Directory(fullPath);
           String html = startHtml(requestPath == '/' ? '📱 My Phone Storage' : '📁 ${requestPath.split('/').last}');
           
@@ -142,7 +142,7 @@ class _ServerScreenState extends State<ServerScreen> {
 
           for (var e in entities) {
             String name = e.path.split('/').last;
-            if (name.startsWith('.')) continue; // Hidden files hide karo
+            if (name.startsWith('.')) continue;
             
             String linkPath = requestPath == '/' ? '/$name' : '$requestPath/$name';
             
@@ -162,7 +162,7 @@ class _ServerScreenState extends State<ServerScreen> {
           request.response..headers.contentType = ContentType.html..write(html)..close();
           
         } else if (FileSystemEntity.isFileSync(fullPath)) {
-          // 📄 FILE STREAM KARO (Play/Download)
+          // 📄 FILE STREAM
           File file = File(fullPath);
           String ext = fullPath.split('.').last.toLowerCase();
           if (['mp4', 'mkv'].contains(ext)) request.response.headers.contentType = ContentType.parse('video/mp4');
@@ -176,7 +176,7 @@ class _ServerScreenState extends State<ServerScreen> {
         }
         
       } else {
-        // === SINGLE FILE SHARE LOGIC ===
+        // === SINGLE FILE SHARE ===
         if (requestPath == '/') {
           String html = startHtml('📄 Shared File');
           String fileName = singleSharedFile!.path.split('/').last;
@@ -192,7 +192,7 @@ class _ServerScreenState extends State<ServerScreen> {
     });
   }
 
-  // === TUNNEL ENGINE (ALTERNATIVE: LOCALHOST.RUN) ===
+  // === TUNNEL ENGINE (BACK TO PINGGY + CONNECTION RESET FIX) ===
   Future<void> startPublicTunnel() async {
     setState(() {
       isTunnelStarting = true;
@@ -200,19 +200,19 @@ class _ServerScreenState extends State<ServerScreen> {
     });
 
     try {
-      // Pinggy ki jagah hum 'localhost.run' server (port 22) use kar rahe hain
-      final socket = await SSHSocket.connect('localhost.run', 22);
+      final socket = await SSHSocket.connect('a.pinggy.io', 443);
       _sshClient = SSHClient(
         socket,
-        username: 'client',
+        username: 'pinggy',
         onPasswordRequest: () => '',
       );
 
       final forward = await _sshClient!.forwardRemote(port: 80);
       forward!.connections.listen((incoming) async {
         try {
-          // Local IP ki jagah direct 127.0.0.1 (localhost) use kar rahe hain taaki Android block na kare
+          // 🚀 MAIN FIX: 'localIp' ki jagah direct '127.0.0.1' use kar rahe hain taaki connection reset na ho!
           final local = await Socket.connect('127.0.0.1', port);
+          
           incoming.stream.cast<List<int>>().listen(
             (data) { try { local.add(data); } catch(e){} },
             onDone: () => local.close(),
@@ -233,8 +233,7 @@ class _ServerScreenState extends State<ServerScreen> {
       String buffer = '';
       void extractUrl(String data) {
         buffer += data;
-        // Localhost.run ka URL format (subdomain.lhr.life) catch karne ke liye naya RegExp
-        final RegExp urlRegExp = RegExp(r'https:\/\/[a-zA-Z0-9.-]+\.lhr\.life');
+        final RegExp urlRegExp = RegExp(r'https:\/\/[a-zA-Z0-9.-]+\.pinggy\.[a-z]+');
         final match = urlRegExp.firstMatch(buffer);
         
         if (match != null && publicUrl == null) {
@@ -366,7 +365,6 @@ class _ServerScreenState extends State<ServerScreen> {
   }
 }
 
-// 🚀 CUSTOM IN-APP FILE EXPLORER WIDGET 🚀
 class InAppFilePicker extends StatefulWidget {
   const InAppFilePicker({super.key});
   @override
@@ -423,7 +421,7 @@ class _InAppFilePickerState extends State<InAppFilePicker> {
         itemBuilder: (context, index) {
           FileSystemEntity item = items[index];
           String name = item.path.split('/').last;
-          if (name.startsWith('.')) return const SizedBox(); // Hide hidden files
+          if (name.startsWith('.')) return const SizedBox();
 
           bool isDir = item is Directory;
           return ListTile(
