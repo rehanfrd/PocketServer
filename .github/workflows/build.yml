@@ -24,9 +24,11 @@ jobs:
         flutter create --platforms android .
         sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />' android/app/src/main/AndroidManifest.xml
         
-        # 🚀 THE ULTIMATE OVERRIDE TRICK 🚀
-        echo "android { compileSdk = 36 }" >> android/app/build.gradle || true
-        echo "android { compileSdk = 36 }" >> android/app/build.gradle.kts || true
+        # 100% WORKING FIX: Seedha version number replace karega
+        sed -i 's/flutter\.compileSdkVersion/36/g' android/app/build.gradle || true
+        sed -i 's/flutter\.compileSdkVersion/36/g' android/app/build.gradle.kts || true
+        sed -i 's/flutter\.targetSdkVersion/36/g' android/app/build.gradle || true
+        sed -i 's/flutter\.targetSdkVersion/36/g' android/app/build.gradle.kts || true
 
     - run: flutter pub get
     - run: flutter build apk --release --no-tree-shake-icons
