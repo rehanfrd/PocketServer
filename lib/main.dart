@@ -1,6 +1,9 @@
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:dartssh2/dartssh2.dart';
 
 void main() {
   runApp(const ServerApp());
@@ -11,7 +14,7 @@ class ServerApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Pocket Server',
+      title: 'ZingShare',
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark().copyWith(
         scaffoldBackgroundColor: const Color(0xFF0F172A),
@@ -33,6 +36,11 @@ class _ServerScreenState extends State<ServerScreen> {
   bool isServerRunning = false;
   String localIp = "";
   int port = 8080;
+
+  // === TUNNEL VARIABLES ===
+  SSHClient? _sshClient;
+  String? publicUrl;
+  bool isTunnelStarting = false;
 
   Future<void> startServer() async {
     await Permission.storage.request();
@@ -58,7 +66,6 @@ class _ServerScreenState extends State<ServerScreen> {
 
     _server!.listen((HttpRequest request) {
       if (request.uri.path == '/') {
-        // === PREMIUM WEB INTERFACE CSS ===
         String html = '''
           <!DOCTYPE html>
           <html lang="en">
@@ -94,7 +101,6 @@ class _ServerScreenState extends State<ServerScreen> {
             String fileName = file.path.split('/').last;
             String ext = fileName.split('.').last.toLowerCase();
             
-            // Icon set karna
             String icon = "📄";
             if (ext == 'mp3' || ext == 'wav') icon = "🎵";
             if (ext == 'mp4' || ext == 'mkv') icon = "🎬";
@@ -104,66 +110,108 @@ class _ServerScreenState extends State<ServerScreen> {
 
             html += '<div class="file-card"><div class="file-header"><span class="file-name">$icon $fileName</span><a href="/download/$fileName" class="download-btn">⬇ Download</a></div>';
             
-            // 🚀 FAST MEDIA PLAYER INJECTOR 🚀
-            // preload="none" use kiya hai taki website turant khule aur hang na ho
             if (ext == 'mp3' || ext == 'wav' || ext == 'm4a') {
                html += '<audio controls preload="none"><source src="/stream/$fileName" type="audio/mpeg"></audio>';
             } else if (ext == 'mp4' || ext == 'webm') {
                html += '<video controls preload="none" height="220"><source src="/stream/$fileName" type="video/mp4"></video>';
             }
-            
             html += '</div>';
           }
         }
-        
         html += '</div></body></html>';
-        request.response
-          ..headers.contentType = ContentType.html
-          ..write(html)
-          ..close();
+        request.response..headers.contentType = ContentType.html..write(html)..close();
           
       } else if (request.uri.path.startsWith('/download/')) {
-        // === SIRF DOWNLOAD KE LIYE ===
         String fileName = request.uri.pathSegments.last;
-        File fileToDownload = File('${downloadDir.path}/$fileName');
-        if (fileToDownload.existsSync()) {
+        File file = File('${downloadDir.path}/$fileName');
+        if (file.existsSync()) {
           request.response.headers.add('Content-Disposition', 'attachment; filename="$fileName"');
-          fileToDownload.openRead().pipe(request.response).catchError((e) => request.response.close());
+          file.openRead().pipe(request.response).catchError((e) => request.response.close());
         } else {
-          request.response..statusCode = HttpStatus.notFound..write('File Not Found')..close();
+          request.response..statusCode = HttpStatus.notFound..write('Not Found')..close();
         }
-        
       } else if (request.uri.path.startsWith('/stream/')) {
-        // === SIRF BROWSER MEIN PLAY KARNE (STREAMING) KE LIYE ===
         String fileName = request.uri.pathSegments.last;
-        File fileToStream = File('${downloadDir.path}/$fileName');
-        if (fileToStream.existsSync()) {
+        File file = File('${downloadDir.path}/$fileName');
+        if (file.existsSync()) {
           String ext = fileName.split('.').last.toLowerCase();
           if (ext == 'mp3') request.response.headers.contentType = ContentType.parse('audio/mpeg');
           if (ext == 'mp4') request.response.headers.contentType = ContentType.parse('video/mp4');
-          // Yahan attachment header NAHI lagaya hai, isliye browser me play hoga
-          fileToStream.openRead().pipe(request.response).catchError((e) => request.response.close());
+          file.openRead().pipe(request.response).catchError((e) => request.response.close());
         } else {
-          request.response..statusCode = HttpStatus.notFound..write('File Not Found')..close();
+          request.response..statusCode = HttpStatus.notFound..write('Not Found')..close();
         }
       }
     });
   }
 
+  // === THE MAGIC TUNNEL ENGINE (NO TERMUX REQUIRED) ===
+  Future<void> startPublicTunnel() async {
+    setState(() {
+      isTunnelStarting = true;
+      publicUrl = null;
+    });
+
+    try {
+      final socket = await SSHSocket.connect('a.pinggy.io', 443);
+      _sshClient = SSHClient(
+        socket,
+        username: 'pinggy',
+        onPasswordRequest: () => '',
+      );
+
+      final session = await _sshClient!.shell();
+      
+      // Pinggy ki aati hui link ko automatically pakadna (Regex Magic)
+      void extractUrl(String data) {
+        final RegExp urlRegExp = RegExp(r'https:\/\/[a-zA-Z0-9-]+\.a\.free\.pinggy\.link');
+        final match = urlRegExp.firstMatch(data);
+        if (match != null && publicUrl == null) {
+          setState(() {
+            publicUrl = match.group(0);
+            isTunnelStarting = false;
+          });
+        }
+      }
+
+      session.stdout.transform(utf8.decoder).listen(extractUrl);
+      session.stderr.transform(utf8.decoder).listen(extractUrl);
+
+      // Traffic ko bypass karna local port 8080 par
+      final forward = await _sshClient!.forwardRemote(port: 0);
+      forward.listen((SSHForwardChannel incoming) async {
+        try {
+          final local = await Socket.connect('127.0.0.1', port);
+          incoming.stream.cast<List<int>>().listen(local.add, onDone: local.close);
+          local.listen(incoming.sink.add, onDone: incoming.close);
+        } catch (e) {
+          incoming.close();
+        }
+      });
+
+    } catch (e) {
+      setState(() => isTunnelStarting = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Tunnel Error: $e')));
+    }
+  }
+
   void stopServer() {
     _server?.close(force: true);
+    _sshClient?.close();
     setState(() {
       isServerRunning = false;
+      publicUrl = null;
       _server = null;
+      _sshClient = null;
     });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('ZingShare Server 🚀', style: TextStyle(fontWeight: FontWeight.bold)), backgroundColor: Colors.transparent, elevation: 0),
+      appBar: AppBar(title: const Text('ZingShare 🚀', style: TextStyle(fontWeight: FontWeight.bold)), backgroundColor: Colors.transparent, elevation: 0),
       body: Center(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(20),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -173,25 +221,55 @@ class _ServerScreenState extends State<ServerScreen> {
               const Text('Your Premium File Server is ready.', style: TextStyle(color: Colors.white70, fontSize: 16), textAlign: TextAlign.center),
               const SizedBox(height: 30),
               
-              if (isServerRunning)
+              if (isServerRunning) ...[
                 Container(
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(color: const Color(0xFF1E293B), borderRadius: BorderRadius.circular(20), border: Border.all(color: const Color(0xFF38BDF8), width: 2)),
                   child: Column(
                     children: [
-                      const Text('Server is Online! 🟢', style: TextStyle(color: Color(0xFF4ADE80), fontSize: 18, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 15),
-                      SelectableText('http://$localIp:$port', style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 20),
+                      const Text('Local Server Online! 🟢', style: TextStyle(color: Color(0xFF4ADE80), fontSize: 18, fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 10),
+                      SelectableText('http://$localIp:$port', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 25),
+                      
+                      // TUNNEL UI
+                      if (publicUrl != null) ...[
+                        const Text('🌍 Public Link Generated:', style: TextStyle(color: Colors.white70, fontSize: 14)),
+                        const SizedBox(height: 5),
+                        SelectableText(publicUrl!, style: const TextStyle(color: Color(0xFF38BDF8), fontSize: 18, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+                        const SizedBox(height: 10),
+                        ElevatedButton.icon(
+                          onPressed: () {
+                            Clipboard.setData(ClipboardData(text: publicUrl!));
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Link Copied!')));
+                          },
+                          icon: const Icon(Icons.copy, color: Colors.white, size: 18),
+                          label: const Text('Copy Link', style: TextStyle(color: Colors.white)),
+                          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF38BDF8)),
+                        ),
+                      ] else if (isTunnelStarting) ...[
+                        const CircularProgressIndicator(color: Color(0xFF38BDF8)),
+                        const SizedBox(height: 10),
+                        const Text('Generating Public Link...', style: TextStyle(color: Colors.white70)),
+                      ] else ...[
+                        ElevatedButton.icon(
+                          onPressed: startPublicTunnel,
+                          icon: const Icon(Icons.public, color: Colors.white),
+                          label: const Text('Go Public (Worldwide)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF818CF8), padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12)),
+                        ),
+                      ],
+                      
+                      const SizedBox(height: 25),
                       ElevatedButton(
                         style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 12)),
                         onPressed: stopServer,
-                        child: const Text('Stop Server', style: TextStyle(color: Colors.white, fontSize: 16)),
+                        child: const Text('Stop Everything', style: TextStyle(color: Colors.white, fontSize: 16)),
                       )
                     ],
                   ),
                 )
-              else
+              ] else
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF38BDF8), padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15)),
                   onPressed: startServer,
