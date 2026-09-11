@@ -145,7 +145,6 @@ class _ServerScreenState extends State<ServerScreen> {
     });
   }
 
-  // === THE MAGIC TUNNEL ENGINE (NO TERMUX REQUIRED) ===
   Future<void> startPublicTunnel() async {
     setState(() {
       isTunnelStarting = true;
@@ -173,13 +172,12 @@ class _ServerScreenState extends State<ServerScreen> {
         }
       }
 
-      // 🛠️ ERROR FIXED HERE: Added cast<List<int>>() 🛠️
       session.stdout.cast<List<int>>().transform(utf8.decoder).listen((data) => extractUrl(data.toString()));
       session.stderr.cast<List<int>>().transform(utf8.decoder).listen((data) => extractUrl(data.toString()));
 
-      // 🛠️ ERROR FIXED HERE: Changed forward.listen to forward.connections.listen 🛠️
+      // 🛠️ NULL SAFETY FIX HERE: forward!.connections 🛠️
       final forward = await _sshClient!.forwardRemote(port: 0);
-      forward.connections.listen((incoming) async {
+      forward!.connections.listen((incoming) async {
         try {
           final local = await Socket.connect('127.0.0.1', port);
           incoming.stream.cast<List<int>>().listen(local.add, onDone: local.close);
@@ -232,7 +230,6 @@ class _ServerScreenState extends State<ServerScreen> {
                       SelectableText('http://$localIp:$port', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 25),
                       
-                      // TUNNEL UI
                       if (publicUrl != null) ...[
                         const Text('🌍 Public Link Generated:', style: TextStyle(color: Colors.white70, fontSize: 14)),
                         const SizedBox(height: 5),
