@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:dartssh2/dartssh2.dart';
-import 'package:file_picker/file_picker.dart';
 
 void main() {
   runApp(const ServerApp());
@@ -41,7 +40,6 @@ class _ServerScreenState extends State<ServerScreen> {
   File? singleSharedFile;
   bool sharingEntireFolder = false;
 
-  // === TUNNEL VARIABLES ===
   SSHClient? _sshClient;
   String? publicUrl;
   bool isTunnelStarting = false;
@@ -58,20 +56,62 @@ class _ServerScreenState extends State<ServerScreen> {
     localIp = '127.0.0.1';
   }
 
-  // OPTION 1: Share Single File
+  // 🚀 HAMARA KHUD KA CUSTOM FILE PICKER 🚀
   Future<void> startSingleFileServer() async {
     await Permission.storage.request();
-    FilePickerResult? result = await FilePicker.platform.pickFiles();
+    await Permission.manageExternalStorage.request();
     
-    if (result != null) {
-      singleSharedFile = File(result.files.single.path!);
+    Directory downloadDir = Directory('/storage/emulated/0/Download');
+    if (!downloadDir.existsSync()) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Download folder not found!')));
+      return;
+    }
+
+    List<File> files = downloadDir.listSync().whereType<File>().toList();
+    
+    if (!mounted) return;
+    
+    // Bottom Sheet me files dikhana
+    File? pickedFile = await showModalBottomSheet<File>(
+      context: context,
+      backgroundColor: const Color(0xFF1E293B),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) {
+        return Column(
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(20.0),
+              child: Text('Select a File to Share', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+            ),
+            Expanded(
+              child: files.isEmpty 
+              ? const Center(child: Text('No files in Download folder.', style: TextStyle(color: Colors.white54)))
+              : ListView.builder(
+                itemCount: files.length,
+                itemBuilder: (context, index) {
+                  File file = files[index];
+                  String fileName = file.path.split('/').last;
+                  return ListTile(
+                    leading: const Icon(Icons.insert_drive_file, color: Color(0xFF38BDF8)),
+                    title: Text(fileName, style: const TextStyle(color: Colors.white70), maxLines: 1, overflow: TextOverflow.ellipsis),
+                    onTap: () => Navigator.pop(context, file),
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      }
+    );
+
+    if (pickedFile != null) {
+      singleSharedFile = pickedFile;
       sharingEntireFolder = false;
       await _getIp();
       _startHttpServer();
     }
   }
 
-  // OPTION 2: Share Entire Download Folder
   Future<void> startFolderServer() async {
     await Permission.storage.request();
     await Permission.manageExternalStorage.request();
@@ -94,7 +134,6 @@ class _ServerScreenState extends State<ServerScreen> {
 
     _server!.listen((HttpRequest request) async {
       if (request.uri.path == '/') {
-        // 🎨 CLASSY & CLEAN WEB UI (Google Files Style) 🎨
         String html = '''
           <!DOCTYPE html>
           <html lang="en">
@@ -139,7 +178,6 @@ class _ServerScreenState extends State<ServerScreen> {
           if (['apk'].contains(ext)) icon = "📱";
           if (['zip', 'rar'].contains(ext)) icon = "📦";
 
-          // Ab custom player nahi, seedha link diya hai. Browser khud open karega!
           html += '''
             <a href="/file/${Uri.encodeComponent(fileName)}" class="item">
               <div class="icon">$icon</div>
@@ -165,7 +203,6 @@ class _ServerScreenState extends State<ServerScreen> {
         if (fileToServe != null && fileToServe.existsSync()) {
           String ext = fileName.split('.').last.toLowerCase();
           
-          // Agar Media/Image hai, to download ke bajaye browser me Play/Show karega
           if (['mp4', 'mkv', 'webm'].contains(ext)) {
             request.response.headers.contentType = ContentType.parse('video/mp4');
           } else if (['mp3', 'wav', 'm4a'].contains(ext)) {
@@ -173,7 +210,6 @@ class _ServerScreenState extends State<ServerScreen> {
           } else if (['jpg', 'jpeg', 'png'].contains(ext)) {
             request.response.headers.contentType = ContentType.parse('image/jpeg');
           } else {
-            // Baki sab (APK, ZIP) direct download honge
             request.response.headers.add('Content-Disposition', 'attachment; filename="$fileName"');
           }
           
@@ -185,7 +221,6 @@ class _ServerScreenState extends State<ServerScreen> {
     });
   }
 
-  // === THE MAGIC TUNNEL ENGINE (CONNECTION RESET FIX) ===
   Future<void> startPublicTunnel() async {
     setState(() {
       isTunnelStarting = true;
@@ -204,14 +239,11 @@ class _ServerScreenState extends State<ServerScreen> {
       forward!.connections.listen((incoming) async {
         try {
           final local = await Socket.connect(localIp, port);
-          
-          // 🚀 FIX: Data pipe ko crash proof bana diya
           incoming.stream.cast<List<int>>().listen(
             (data) { try { local.add(data); } catch(e){} },
             onDone: () => local.close(),
             onError: (e) => local.close(),
           );
-          
           local.listen(
             (data) { try { incoming.sink.add(data); } catch(e){} },
             onDone: () => incoming.close(),
@@ -335,7 +367,6 @@ class _ServerScreenState extends State<ServerScreen> {
                 const Text('What do you want to share?', style: TextStyle(color: Colors.white70, fontSize: 16), textAlign: TextAlign.center),
                 const SizedBox(height: 30),
                 
-                // NAYA FEATURE: Single File Select Karne Ka Button
                 ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF38BDF8), padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15)),
                   onPressed: startSingleFileServer,
