@@ -142,7 +142,7 @@ class _ServerScreenState extends State<ServerScreen> {
 
           for (var e in entities) {
             String name = e.path.split('/').last;
-            if (name.startsWith('.')) continue; // Hidden files hide
+            if (name.startsWith('.')) continue; // Hide hidden files
             
             String linkPath = requestPath == '/' ? '/$name' : '$requestPath/$name';
             
@@ -192,7 +192,7 @@ class _ServerScreenState extends State<ServerScreen> {
     });
   }
 
-  // === TUNNEL ENGINE (PINGGY + ROBUST PIPING FIX) ===
+  // === TUNNEL ENGINE (SERVEO.NET WITH ROBUST PIPING) ===
   Future<void> startPublicTunnel() async {
     setState(() {
       isTunnelStarting = true;
@@ -200,20 +200,20 @@ class _ServerScreenState extends State<ServerScreen> {
     });
 
     try {
-      final socket = await SSHSocket.connect('a.pinggy.io', 443);
+      // 🌐 Changed to Serveo
+      final socket = await SSHSocket.connect('serveo.net', 22);
       _sshClient = SSHClient(
         socket,
-        username: 'pinggy',
+        username: 'serveo', 
         onPasswordRequest: () => '',
       );
 
       final forward = await _sshClient!.forwardRemote(port: 80);
       forward!.connections.listen((incoming) async {
         try {
-          // IP 127.0.0.1 (Localhost) use kar rahe hain connection allow karne ke liye
           final local = await Socket.connect('127.0.0.1', port);
           
-          // 🚀 ROBUST DATA PIPING: Ye block data flow ko smooth banayega aur "Connection Reset" ko rokega
+          // 🚀 ROBUST DATA PIPING to prevent connection reset
           Future.wait([
             incoming.stream.cast<List<int>>().pipe(local),
             local.pipe(incoming.sink),
@@ -230,7 +230,8 @@ class _ServerScreenState extends State<ServerScreen> {
       String buffer = '';
       void extractUrl(String data) {
         buffer += data;
-        final RegExp urlRegExp = RegExp(r'https:\/\/[a-zA-Z0-9.-]+\.pinggy\.[a-z]+');
+        // 🌐 URL Regex updated for Serveo (.serveo.net)
+        final RegExp urlRegExp = RegExp(r'https:\/\/[a-zA-Z0-9.-]+\.serveo\.net');
         final match = urlRegExp.firstMatch(buffer);
         
         if (match != null && publicUrl == null) {
