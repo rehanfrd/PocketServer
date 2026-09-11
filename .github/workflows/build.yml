@@ -24,10 +24,18 @@ jobs:
         flutter create --platforms android .
         sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />' android/app/src/main/AndroidManifest.xml
         
-        # BRAHMASTRA: Har file me dhundh kar version 36 karega
-        find android -type f -name "build.gradle*" -exec sed -i 's/flutter\.compileSdkVersion/36/g' {} +
-        find android -type f -name "build.gradle*" -exec sed -i 's/compileSdk = [0-9]*/compileSdk = 36/g' {} +
-        find android -type f -name "build.gradle*" -exec sed -i 's/compileSdkVersion [0-9]*/compileSdkVersion 36/g' {} +
+        # PYTHON HACK: 100% Guaranteed Version 36 Update
+        python -c "
+        import os
+        for f in ['android/app/build.gradle', 'android/app/build.gradle.kts']:
+            if os.path.exists(f):
+                with open(f, 'r') as file:
+                    data = file.read()
+                data = data.replace('flutter.compileSdkVersion', '36')
+                data = data.replace('flutter.targetSdkVersion', '36')
+                with open(f, 'w') as file:
+                    file.write(data)
+        "
 
     - run: flutter pub get
     - run: flutter build apk --release --no-tree-shake-icons
@@ -36,4 +44,3 @@ jobs:
       with:
         name: Pocket-Server-App
         path: build/app/outputs/flutter-apk/app-release.apk
-        
