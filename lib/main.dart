@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:dartssh2/dartssh2.dart';
+import 'package:file_picker/file_picker.dart';
 
 void main() {
   runApp(const ServerApp());
@@ -37,12 +38,41 @@ class _ServerScreenState extends State<ServerScreen> {
   String localIp = "";
   int port = 8080;
 
+  File? singleSharedFile;
+  bool sharingEntireFolder = false;
+
   // === TUNNEL VARIABLES ===
   SSHClient? _sshClient;
   String? publicUrl;
   bool isTunnelStarting = false;
 
-  Future<void> startServer() async {
+  Future<void> _getIp() async {
+    for (var interface in await NetworkInterface.list()) {
+      for (var addr in interface.addresses) {
+        if (addr.type == InternetAddressType.IPv4) {
+          localIp = addr.address;
+          return;
+        }
+      }
+    }
+    localIp = '127.0.0.1';
+  }
+
+  // OPTION 1: Share Single File
+  Future<void> startSingleFileServer() async {
+    await Permission.storage.request();
+    FilePickerResult? result = await FilePicker.platform.pickFiles();
+    
+    if (result != null) {
+      singleSharedFile = File(result.files.single.path!);
+      sharingEntireFolder = false;
+      await _getIp();
+      _startHttpServer();
+    }
+  }
+
+  // OPTION 2: Share Entire Download Folder
+  Future<void> startFolderServer() async {
     await Permission.storage.request();
     await Permission.manageExternalStorage.request();
     
@@ -51,97 +81,105 @@ class _ServerScreenState extends State<ServerScreen> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Download folder not found!')));
       return;
     }
+    
+    singleSharedFile = null;
+    sharingEntireFolder = true;
+    await _getIp();
+    _startHttpServer();
+  }
 
-    // 🚀 IP FETCH SAFETY 🚀
-    for (var interface in await NetworkInterface.list()) {
-      for (var addr in interface.addresses) {
-        if (addr.type == InternetAddressType.IPv4) {
-          localIp = addr.address;
-          break;
-        }
-      }
-    }
-    if (localIp.isEmpty) localIp = '127.0.0.1'; // Failsafe
-
+  void _startHttpServer() async {
     _server = await HttpServer.bind(InternetAddress.anyIPv4, port);
     setState(() => isServerRunning = true);
 
-    _server!.listen((HttpRequest request) {
+    _server!.listen((HttpRequest request) async {
       if (request.uri.path == '/') {
+        // 🎨 CLASSY & CLEAN WEB UI (Google Files Style) 🎨
         String html = '''
           <!DOCTYPE html>
           <html lang="en">
           <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>ZingShare Server</title>
+            <title>ZingShare Files</title>
             <style>
-              body { background-color: #0F172A; color: white; font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; }
-              .header { text-align: center; margin-bottom: 30px; }
-              .header h2 { color: #38BDF8; font-size: 28px; margin: 0; }
-              .header p { color: #94A3B8; font-size: 14px; }
-              .container { max-width: 700px; margin: 0 auto; }
-              .file-card { background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px; padding: 15px; margin-bottom: 15px; backdrop-filter: blur(10px); display: flex; flex-direction: column; gap: 12px; }
-              .file-header { display: flex; justify-content: space-between; align-items: center; }
-              .file-name { font-size: 16px; font-weight: 600; word-break: break-all; color: #E2E8F0; display: flex; align-items: center; gap: 8px; }
-              .download-btn { background: #38BDF8; color: #0F172A; padding: 8px 16px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 14px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-              audio, video { width: 100%; border-radius: 8px; outline: none; background: #1E293B; }
-              audio::-webkit-media-controls-panel, video::-webkit-media-controls-panel { background-color: #38BDF8; }
+              body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; background: #f8f9fa; color: #202124; }
+              .app-bar { background: #ffffff; padding: 18px 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); position: sticky; top: 0; z-index: 100; display: flex; align-items: center; }
+              .app-bar h2 { margin: 0; font-size: 20px; color: #1a73e8; font-weight: 600; letter-spacing: 0.5px; }
+              .list { list-style: none; padding: 0; margin: 0; }
+              .item { display: flex; align-items: center; padding: 16px 20px; border-bottom: 1px solid #e8eaed; background: #ffffff; text-decoration: none; color: inherit; transition: background 0.2s; }
+              .item:active { background: #f1f3f4; }
+              .icon { font-size: 26px; margin-right: 18px; }
+              .name { flex-grow: 1; font-size: 16px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+              .action { color: #1a73e8; font-size: 20px; font-weight: bold; }
             </style>
           </head>
           <body>
-            <div class="container">
-              <div class="header">
-                <h2>🚀 ZingShare Server</h2>
-                <p>Fast • Secure • Local File Sharing</p>
-              </div>
+            <div class="app-bar"><h2>📁 Shared Files</h2></div>
+            <ul class="list">
         ''';
         
-        List<FileSystemEntity> files = downloadDir.listSync();
-        for (var file in files) {
-          if (file is File) {
-            String fileName = file.path.split('/').last;
-            String ext = fileName.split('.').last.toLowerCase();
-            
-            String icon = "📄";
-            if (ext == 'mp3' || ext == 'wav') icon = "🎵";
-            if (ext == 'mp4' || ext == 'mkv') icon = "🎬";
-            if (ext == 'apk') icon = "📱";
-            if (ext == 'zip' || ext == 'rar') icon = "📦";
-            if (ext == 'jpg' || ext == 'png' || ext == 'jpeg') icon = "🖼️";
-
-            html += '<div class="file-card"><div class="file-header"><span class="file-name">$icon $fileName</span><a href="/download/$fileName" class="download-btn">⬇ Download</a></div>';
-            
-            if (ext == 'mp3' || ext == 'wav' || ext == 'm4a') {
-               html += '<audio controls preload="none"><source src="/stream/$fileName" type="audio/mpeg"></audio>';
-            } else if (ext == 'mp4' || ext == 'webm') {
-               html += '<video controls preload="none" height="220"><source src="/stream/$fileName" type="video/mp4"></video>';
-            }
-            html += '</div>';
-          }
+        List<File> filesToShow = [];
+        if (sharingEntireFolder) {
+          Directory downloadDir = Directory('/storage/emulated/0/Download');
+          List<FileSystemEntity> entities = downloadDir.listSync();
+          for (var e in entities) { if (e is File) filesToShow.add(e); }
+        } else if (singleSharedFile != null) {
+          filesToShow.add(singleSharedFile!);
         }
-        html += '</div></body></html>';
+
+        for (var file in filesToShow) {
+          String fileName = file.path.split('/').last;
+          String ext = fileName.split('.').last.toLowerCase();
+          
+          String icon = "📄";
+          if (['mp3', 'wav', 'm4a'].contains(ext)) icon = "🎵";
+          if (['mp4', 'mkv', 'webm'].contains(ext)) icon = "🎬";
+          if (['jpg', 'jpeg', 'png'].contains(ext)) icon = "🖼️";
+          if (['apk'].contains(ext)) icon = "📱";
+          if (['zip', 'rar'].contains(ext)) icon = "📦";
+
+          // Ab custom player nahi, seedha link diya hai. Browser khud open karega!
+          html += '''
+            <a href="/file/${Uri.encodeComponent(fileName)}" class="item">
+              <div class="icon">$icon</div>
+              <div class="name">$fileName</div>
+              <div class="action">↓</div>
+            </a>
+          ''';
+        }
+        
+        html += '</ul></body></html>';
         request.response..headers.contentType = ContentType.html..write(html)..close();
           
-      } else if (request.uri.path.startsWith('/download/')) {
-        String fileName = request.uri.pathSegments.last;
-        File file = File('${downloadDir.path}/$fileName');
-        if (file.existsSync()) {
-          request.response.headers.add('Content-Disposition', 'attachment; filename="$fileName"');
-          file.openRead().pipe(request.response).catchError((e) => request.response.close());
-        } else {
-          request.response..statusCode = HttpStatus.notFound..write('Not Found')..close();
+      } else if (request.uri.path.startsWith('/file/')) {
+        String fileName = Uri.decodeComponent(request.uri.pathSegments.last);
+        File? fileToServe;
+
+        if (sharingEntireFolder) {
+          fileToServe = File('/storage/emulated/0/Download/$fileName');
+        } else if (singleSharedFile != null && singleSharedFile!.path.endsWith(fileName)) {
+          fileToServe = singleSharedFile;
         }
-      } else if (request.uri.path.startsWith('/stream/')) {
-        String fileName = request.uri.pathSegments.last;
-        File file = File('${downloadDir.path}/$fileName');
-        if (file.existsSync()) {
+
+        if (fileToServe != null && fileToServe.existsSync()) {
           String ext = fileName.split('.').last.toLowerCase();
-          if (ext == 'mp3') request.response.headers.contentType = ContentType.parse('audio/mpeg');
-          if (ext == 'mp4') request.response.headers.contentType = ContentType.parse('video/mp4');
-          file.openRead().pipe(request.response).catchError((e) => request.response.close());
+          
+          // Agar Media/Image hai, to download ke bajaye browser me Play/Show karega
+          if (['mp4', 'mkv', 'webm'].contains(ext)) {
+            request.response.headers.contentType = ContentType.parse('video/mp4');
+          } else if (['mp3', 'wav', 'm4a'].contains(ext)) {
+            request.response.headers.contentType = ContentType.parse('audio/mpeg');
+          } else if (['jpg', 'jpeg', 'png'].contains(ext)) {
+            request.response.headers.contentType = ContentType.parse('image/jpeg');
+          } else {
+            // Baki sab (APK, ZIP) direct download honge
+            request.response.headers.add('Content-Disposition', 'attachment; filename="$fileName"');
+          }
+          
+          await fileToServe.openRead().pipe(request.response).catchError((e) => request.response.close());
         } else {
-          request.response..statusCode = HttpStatus.notFound..write('Not Found')..close();
+          request.response..statusCode = HttpStatus.notFound..write('File Not Found')..close();
         }
       }
     });
@@ -165,29 +203,26 @@ class _ServerScreenState extends State<ServerScreen> {
       final forward = await _sshClient!.forwardRemote(port: 0);
       forward!.connections.listen((incoming) async {
         try {
-          // 🚀 FIX: Localhost ki jagah Asli IP use kiya, jisse security block na kare
           final local = await Socket.connect(localIp, port);
           
-          // 🚀 FIX: Data stream ko fail-safe banaya (Error aane par destroy)
+          // 🚀 FIX: Data pipe ko crash proof bana diya
           incoming.stream.cast<List<int>>().listen(
-            (data) => local.add(data),
-            onDone: () => local.destroy(),
-            onError: (_) => local.destroy(),
+            (data) { try { local.add(data); } catch(e){} },
+            onDone: () => local.close(),
+            onError: (e) => local.close(),
           );
           
           local.listen(
-            (data) => incoming.sink.add(data),
+            (data) { try { incoming.sink.add(data); } catch(e){} },
             onDone: () => incoming.close(),
-            onError: (_) => incoming.close(),
+            onError: (e) => incoming.close(),
           );
         } catch (e) {
           incoming.close();
         }
       });
 
-      final session = await _sshClient!.shell(
-        pty: const SSHPtyConfig(width: 100, height: 50)
-      );
+      final session = await _sshClient!.shell(pty: const SSHPtyConfig(width: 100, height: 50));
       
       String buffer = '';
       void extractUrl(String data) {
@@ -232,6 +267,7 @@ class _ServerScreenState extends State<ServerScreen> {
       publicUrl = null;
       _server = null;
       _sshClient = null;
+      singleSharedFile = null;
     });
   }
 
@@ -247,8 +283,6 @@ class _ServerScreenState extends State<ServerScreen> {
             children: [
               const Icon(Icons.cast_connected_rounded, size: 90, color: Color(0xFF38BDF8)),
               const SizedBox(height: 20),
-              const Text('Your Premium File Server is ready.', style: TextStyle(color: Colors.white70, fontSize: 16), textAlign: TextAlign.center),
-              const SizedBox(height: 30),
               
               if (isServerRunning) ...[
                 Container(
@@ -256,7 +290,7 @@ class _ServerScreenState extends State<ServerScreen> {
                   decoration: BoxDecoration(color: const Color(0xFF1E293B), borderRadius: BorderRadius.circular(20), border: Border.all(color: const Color(0xFF38BDF8), width: 2)),
                   child: Column(
                     children: [
-                      const Text('Local Server Online! 🟢', style: TextStyle(color: Color(0xFF4ADE80), fontSize: 18, fontWeight: FontWeight.bold)),
+                      Text(sharingEntireFolder ? 'Sharing Entire Folder 📁' : 'Sharing Single File 📄', style: const TextStyle(color: Color(0xFF4ADE80), fontSize: 16, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 10),
                       SelectableText('http://$localIp:$port', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 25),
@@ -278,7 +312,7 @@ class _ServerScreenState extends State<ServerScreen> {
                       ] else if (isTunnelStarting) ...[
                         const CircularProgressIndicator(color: Color(0xFF38BDF8)),
                         const SizedBox(height: 10),
-                        const Text('Generating Public Link...', style: TextStyle(color: Colors.white70)),
+                        const Text('Extracting Public Link...', style: TextStyle(color: Colors.white70)),
                       ] else ...[
                         ElevatedButton.icon(
                           onPressed: startPublicTunnel,
@@ -297,12 +331,27 @@ class _ServerScreenState extends State<ServerScreen> {
                     ],
                   ),
                 )
-              ] else
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF38BDF8), padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15)),
-                  onPressed: startServer,
-                  child: const Text('Start Server', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+              ] else ...[
+                const Text('What do you want to share?', style: TextStyle(color: Colors.white70, fontSize: 16), textAlign: TextAlign.center),
+                const SizedBox(height: 30),
+                
+                // NAYA FEATURE: Single File Select Karne Ka Button
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF38BDF8), padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15)),
+                  onPressed: startSingleFileServer,
+                  icon: const Icon(Icons.insert_drive_file, color: Colors.white),
+                  label: const Text('Select a Single File', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
                 ),
+                const SizedBox(height: 15),
+                const Text('--- OR ---', style: TextStyle(color: Colors.white54)),
+                const SizedBox(height: 15),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1E293B), padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15), side: const BorderSide(color: Color(0xFF38BDF8))),
+                  onPressed: startFolderServer,
+                  icon: const Icon(Icons.folder, color: Color(0xFF38BDF8)),
+                  label: const Text('Share "Download" Folder', style: TextStyle(color: Color(0xFF38BDF8), fontSize: 16, fontWeight: FontWeight.bold)),
+                ),
+              ]
             ],
           ),
         ),
