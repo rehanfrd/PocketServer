@@ -1,9 +1,8 @@
 import 'dart:io';
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:dartssh2/dartssh2.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 void main() {
   runApp(const ServerApp());
@@ -39,10 +38,6 @@ class _ServerScreenState extends State<ServerScreen> {
 
   File? singleSharedFile;
   bool sharingEntirePhone = false;
-
-  SSHClient? _sshClient;
-  String? publicUrl;
-  bool isTunnelStarting = false;
 
   Future<void> _getIp() async {
     for (var interface in await NetworkInterface.list()) {
@@ -122,7 +117,6 @@ class _ServerScreenState extends State<ServerScreen> {
         String fullPath = requestPath == '/' ? basePath : '$basePath$requestPath';
         
         if (FileSystemEntity.isDirectorySync(fullPath)) {
-          // 📁 DIRECTORY DIKHAO
           Directory dir = Directory(fullPath);
           String html = startHtml(requestPath == '/' ? '📱 My Phone Storage' : '📁 ${requestPath.split('/').last}');
           
@@ -142,7 +136,7 @@ class _ServerScreenState extends State<ServerScreen> {
 
           for (var e in entities) {
             String name = e.path.split('/').last;
-            if (name.startsWith('.')) continue; // Hide hidden files
+            if (name.startsWith('.')) continue;
             
             String linkPath = requestPath == '/' ? '/$name' : '$requestPath/$name';
             
@@ -162,7 +156,6 @@ class _ServerScreenState extends State<ServerScreen> {
           request.response..headers.contentType = ContentType.html..write(html)..close();
           
         } else if (FileSystemEntity.isFileSync(fullPath)) {
-          // 📄 FILE STREAM
           File file = File(fullPath);
           String ext = fullPath.split('.').last.toLowerCase();
           if (['mp4', 'mkv'].contains(ext)) request.response.headers.contentType = ContentType.parse('video/mp4');
@@ -176,7 +169,6 @@ class _ServerScreenState extends State<ServerScreen> {
         }
         
       } else {
-        // === SINGLE FILE SHARE ===
         if (requestPath == '/') {
           String html = startHtml('📄 Shared File');
           String fileName = singleSharedFile!.path.split('/').last;
@@ -192,93 +184,19 @@ class _ServerScreenState extends State<ServerScreen> {
     });
   }
 
-  // === TUNNEL ENGINE (SERVEO.NET WITH COMPILE-SAFE LISTENER) ===
-  Future<void> startPublicTunnel() async {
-    setState(() {
-      isTunnelStarting = true;
-      publicUrl = null;
-    });
-
-    try {
-      final socket = await SSHSocket.connect('serveo.net', 22);
-      _sshClient = SSHClient(
-        socket,
-        username: 'serveo', 
-        onPasswordRequest: () => '',
-      );
-
-      final forward = await _sshClient!.forwardRemote(port: 80);
-      forward!.connections.listen((incoming) async {
-        try {
-          final local = await Socket.connect('127.0.0.1', port);
-          
-          // 🚀 FIX: Reverted to type-safe .listen() to fix the Build Error!
-          incoming.stream.cast<List<int>>().listen(
-            (data) { try { local.add(data); } catch(e){} },
-            onDone: () => local.close(),
-            onError: (e) => local.close(),
-          );
-          local.listen(
-            (data) { try { incoming.sink.add(data); } catch(e){} },
-            onDone: () => incoming.close(),
-            onError: (e) => incoming.close(),
-          );
-        } catch (e) {
-          incoming.close();
-        }
-      });
-
-      final session = await _sshClient!.shell(pty: const SSHPtyConfig(width: 100, height: 50));
-      
-      String buffer = '';
-      void extractUrl(String data) {
-        buffer += data;
-        final RegExp urlRegExp = RegExp(r'https:\/\/[a-zA-Z0-9.-]+\.serveo\.net');
-        final match = urlRegExp.firstMatch(buffer);
-        
-        if (match != null && publicUrl == null) {
-          setState(() {
-            publicUrl = match.group(0);
-            isTunnelStarting = false;
-          });
-        }
-      }
-
-      session.stdout.cast<List<int>>().transform(utf8.decoder).listen((data) => extractUrl(data.toString()));
-      session.stderr.cast<List<int>>().transform(utf8.decoder).listen((data) => extractUrl(data.toString()));
-
-      Future.delayed(const Duration(seconds: 25), () {
-        if (mounted && isTunnelStarting) {
-          setState(() {
-            isTunnelStarting = false;
-            _sshClient?.close();
-          });
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Network is slow. Please try again!')));
-        }
-      });
-
-    } catch (e) {
-      if (mounted) {
-        setState(() => isTunnelStarting = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Tunnel Error: $e')));
-      }
-    }
-  }
-
   void stopServer() {
     _server?.close(force: true);
-    _sshClient?.close();
     setState(() {
       isServerRunning = false;
-      publicUrl = null;
       _server = null;
-      _sshClient = null;
       singleSharedFile = null;
     });
   }
 
   @override
   Widget build(BuildContext context) {
+    String serverUrl = 'http://$localIp:$port';
+
     return Scaffold(
       appBar: AppBar(title: const Text('ZingShare 🚀', style: TextStyle(fontWeight: FontWeight.bold)), backgroundColor: Colors.transparent, elevation: 0),
       body: Center(
@@ -287,62 +205,85 @@ class _ServerScreenState extends State<ServerScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.cast_connected_rounded, size: 90, color: Color(0xFF38BDF8)),
+              const Icon(Icons.wifi_rounded, size: 90, color: Color(0xFF38BDF8)),
               const SizedBox(height: 20),
               
               if (isServerRunning) ...[
                 Container(
                   padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(color: const Color(0xFF1E293B), borderRadius: BorderRadius.circular(20), border: Border.all(color: const Color(0xFF38BDF8), width: 2)),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1E293B),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: const Color(0xFF38BDF8), width: 2),
+                  ),
                   child: Column(
                     children: [
-                      Text(sharingEntirePhone ? 'Sharing Entire Phone 📱' : 'Sharing Single File 📄', style: const TextStyle(color: Color(0xFF4ADE80), fontSize: 16, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 10),
-                      SelectableText('http://$localIp:$port', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 25),
+                      Text(
+                        sharingEntirePhone ? 'Sharing Entire Phone 📱' : 'Sharing Single File 📄',
+                        style: const TextStyle(color: Color(0xFF4ADE80), fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 15),
                       
-                      if (publicUrl != null) ...[
-                        const Text('🌍 Public Link Generated:', style: TextStyle(color: Colors.white70, fontSize: 14)),
-                        const SizedBox(height: 5),
-                        SelectableText(publicUrl!, style: const TextStyle(color: Color(0xFF38BDF8), fontSize: 18, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
-                        const SizedBox(height: 10),
-                        ElevatedButton.icon(
-                          onPressed: () {
-                            Clipboard.setData(ClipboardData(text: publicUrl!));
-                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Link Copied!')));
-                          },
-                          icon: const Icon(Icons.copy, color: Colors.white, size: 18),
-                          label: const Text('Copy Link', style: TextStyle(color: Colors.white)),
-                          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF38BDF8)),
+                      // 📷 QR CODE FOR SCANNING
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
                         ),
-                      ] else if (isTunnelStarting) ...[
-                        const CircularProgressIndicator(color: Color(0xFF38BDF8)),
-                        const SizedBox(height: 10),
-                        const Text('Extracting Public Link...', style: TextStyle(color: Colors.white70)),
-                      ] else ...[
-                        ElevatedButton.icon(
-                          onPressed: startPublicTunnel,
-                          icon: const Icon(Icons.public, color: Colors.white),
-                          label: const Text('Go Public (Worldwide)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF818CF8), padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12)),
+                        child: QrImageView(
+                          data: serverUrl,
+                          version: QrVersions.auto,
+                          size: 180.0,
+                          backgroundColor: Colors.white,
                         ),
-                      ],
+                      ),
+                      const SizedBox(height: 15),
+
+                      const Text('Scan QR or open this link:', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                      const SizedBox(height: 5),
+                      SelectableText(
+                        serverUrl,
+                        style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 15),
+
+                      // 📋 COPY LINK BUTTON
+                      ElevatedButton.icon(
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: serverUrl));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Link Copied to Clipboard!')),
+                          );
+                        },
+                        icon: const Icon(Icons.copy, color: Colors.white, size: 18),
+                        label: const Text('Copy Local Link', style: TextStyle(color: Colors.white)),
+                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF38BDF8)),
+                      ),
+                      const SizedBox(height: 20),
                       
-                      const SizedBox(height: 25),
+                      // 🛑 STOP SERVER BUTTON
                       ElevatedButton(
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 12)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.redAccent,
+                          padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 12),
+                        ),
                         onPressed: stopServer,
-                        child: const Text('Stop Everything', style: TextStyle(color: Colors.white, fontSize: 16)),
+                        child: const Text('Stop Server', style: TextStyle(color: Colors.white, fontSize: 16)),
                       )
                     ],
                   ),
                 )
               ] else ...[
-                const Text('What do you want to share?', style: TextStyle(color: Colors.white70, fontSize: 16), textAlign: TextAlign.center),
+                const Text('What do you want to share locally?', style: TextStyle(color: Colors.white70, fontSize: 16), textAlign: TextAlign.center),
                 const SizedBox(height: 30),
                 
                 ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF38BDF8), padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF38BDF8),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+                  ),
                   onPressed: startSingleFileServer,
                   icon: const Icon(Icons.insert_drive_file, color: Colors.white),
                   label: const Text('Select a Single File', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
@@ -351,7 +292,11 @@ class _ServerScreenState extends State<ServerScreen> {
                 const Text('--- OR ---', style: TextStyle(color: Colors.white54)),
                 const SizedBox(height: 15),
                 ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1E293B), padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15), side: const BorderSide(color: Color(0xFF38BDF8))),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF1E293B),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+                    side: const BorderSide(color: Color(0xFF38BDF8)),
+                  ),
                   onPressed: startPhoneServer,
                   icon: const Icon(Icons.phone_android, color: Color(0xFF38BDF8)),
                   label: const Text('Share Entire Phone Storage', style: TextStyle(color: Color(0xFF38BDF8), fontSize: 16, fontWeight: FontWeight.bold)),
