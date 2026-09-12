@@ -51,7 +51,6 @@ class _ServerScreenState extends State<ServerScreen> {
     localIp = '127.0.0.1';
   }
 
-  // 🚀 FEATURE 1: IN-BUILT CUSTOM FILE EXPLORER 🚀
   Future<void> startSingleFileServer() async {
     await Permission.storage.request();
     await Permission.manageExternalStorage.request();
@@ -69,7 +68,6 @@ class _ServerScreenState extends State<ServerScreen> {
     }
   }
 
-  // 🚀 FEATURE 2: SHARE ENTIRE PHONE 🚀
   Future<void> startPhoneServer() async {
     await Permission.storage.request();
     await Permission.manageExternalStorage.request();
@@ -87,13 +85,14 @@ class _ServerScreenState extends State<ServerScreen> {
     _server!.listen((HttpRequest request) async {
       String requestPath = Uri.decodeComponent(request.uri.path);
       
-      // === WEB UI HTML TEMPLATE ===
+      // 🚀 SPEED FIX 2: Browser ko favicon ke liye infinite load hone se roko
       String startHtml(String title) => '''
         <!DOCTYPE html>
         <html lang="en">
         <head>
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <link rel="icon" href="data:,"> <!-- Yeh line browser ko hang hone se rokti hai -->
           <title>$title</title>
           <style>
             body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; background: #f8f9fa; color: #202124; }
@@ -126,32 +125,40 @@ class _ServerScreenState extends State<ServerScreen> {
             html += '<a href="$parentPath" class="item"><div class="icon">🔙</div><div class="name">... Go Back</div></a>';
           }
           
-          List<FileSystemEntity> entities = dir.listSync()..sort((a, b) {
-            bool aIsDir = a is Directory;
-            bool bIsDir = b is Directory;
-            if (aIsDir && !bIsDir) return -1;
-            if (!aIsDir && bIsDir) return 1;
-            return a.path.toLowerCase().compareTo(b.path.toLowerCase());
-          });
+          try {
+            // 🚀 SPEED FIX 1: listSync ki jagah async use kiya taaki large folders par app hang na ho!
+            List<FileSystemEntity> entities = await dir.list().toList();
+            
+            entities.sort((a, b) {
+              bool aIsDir = a is Directory;
+              bool bIsDir = b is Directory;
+              if (aIsDir && !bIsDir) return -1;
+              if (!aIsDir && bIsDir) return 1;
+              return a.path.toLowerCase().compareTo(b.path.toLowerCase());
+            });
 
-          for (var e in entities) {
-            String name = e.path.split('/').last;
-            if (name.startsWith('.')) continue;
-            
-            String linkPath = requestPath == '/' ? '/$name' : '$requestPath/$name';
-            
-            if (e is Directory) {
-              html += '<a href="${Uri.encodeComponent(linkPath).replaceAll('%2F', '/')}" class="item"><div class="icon">📁</div><div class="name">$name</div><div class="action">></div></a>';
-            } else {
-              String ext = name.split('.').last.toLowerCase();
-              String icon = "📄";
-              if (['mp3', 'wav', 'm4a'].contains(ext)) icon = "🎵";
-              if (['mp4', 'mkv', 'webm'].contains(ext)) icon = "🎬";
-              if (['jpg', 'jpeg', 'png'].contains(ext)) icon = "🖼️";
-              if (['apk'].contains(ext)) icon = "📱";
-              html += '<a href="${Uri.encodeComponent(linkPath).replaceAll('%2F', '/')}" class="item"><div class="icon">$icon</div><div class="name">$name</div><div class="action">↓</div></a>';
+            for (var e in entities) {
+              String name = e.path.split('/').last;
+              if (name.startsWith('.')) continue;
+              
+              String linkPath = requestPath == '/' ? '/$name' : '$requestPath/$name';
+              
+              if (e is Directory) {
+                html += '<a href="${Uri.encodeComponent(linkPath).replaceAll('%2F', '/')}" class="item"><div class="icon">📁</div><div class="name">$name</div><div class="action">></div></a>';
+              } else {
+                String ext = name.split('.').last.toLowerCase();
+                String icon = "📄";
+                if (['mp3', 'wav', 'm4a'].contains(ext)) icon = "🎵";
+                if (['mp4', 'mkv', 'webm'].contains(ext)) icon = "🎬";
+                if (['jpg', 'jpeg', 'png'].contains(ext)) icon = "🖼️";
+                if (['apk'].contains(ext)) icon = "📱";
+                html += '<a href="${Uri.encodeComponent(linkPath).replaceAll('%2F', '/')}" class="item"><div class="icon">$icon</div><div class="name">$name</div><div class="action">↓</div></a>';
+              }
             }
+          } catch (e) {
+            html += '<div class="item"><div class="name" style="color:red;">Error loading folder</div></div>';
           }
+          
           html += '</ul></body></html>';
           request.response..headers.contentType = ContentType.html..write(html)..close();
           
@@ -160,11 +167,12 @@ class _ServerScreenState extends State<ServerScreen> {
           String ext = fullPath.split('.').last.toLowerCase();
           if (['mp4', 'mkv'].contains(ext)) request.response.headers.contentType = ContentType.parse('video/mp4');
           else if (['mp3', 'wav'].contains(ext)) request.response.headers.contentType = ContentType.parse('audio/mpeg');
-          else if (['jpg', 'png'].contains(ext)) request.response.headers.contentType = ContentType.parse('image/jpeg');
+          else if (['jpg', 'png', 'jpeg'].contains(ext)) request.response.headers.contentType = ContentType.parse('image/jpeg');
           else request.response.headers.add('Content-Disposition', 'attachment; filename="${fullPath.split('/').last}"');
           
           await file.openRead().pipe(request.response).catchError((e) => request.response.close());
         } else {
+          // 🚀 SPEED FIX 3: Unwanted requests (like bots/browser background checks) ko turant band karo
           request.response..statusCode = HttpStatus.notFound..write('Not Found')..close();
         }
         
@@ -179,6 +187,9 @@ class _ServerScreenState extends State<ServerScreen> {
           String fileName = singleSharedFile!.path.split('/').last;
           request.response.headers.add('Content-Disposition', 'attachment; filename="$fileName"');
           await singleSharedFile!.openRead().pipe(request.response).catchError((e) => request.response.close());
+        } else {
+          // Unwanted request in single file mode ko band karo
+          request.response..statusCode = HttpStatus.notFound..close();
         }
       }
     });
@@ -224,7 +235,6 @@ class _ServerScreenState extends State<ServerScreen> {
                       ),
                       const SizedBox(height: 15),
                       
-                      // 📷 QR CODE FOR SCANNING
                       Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
@@ -249,7 +259,6 @@ class _ServerScreenState extends State<ServerScreen> {
                       ),
                       const SizedBox(height: 15),
 
-                      // 📋 COPY LINK BUTTON
                       ElevatedButton.icon(
                         onPressed: () {
                           Clipboard.setData(ClipboardData(text: serverUrl));
@@ -263,7 +272,6 @@ class _ServerScreenState extends State<ServerScreen> {
                       ),
                       const SizedBox(height: 20),
                       
-                      // 🛑 STOP SERVER BUTTON
                       ElevatedButton(
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.redAccent,
